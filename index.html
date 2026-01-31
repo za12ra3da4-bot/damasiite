@@ -426,7 +426,6 @@
             margin-bottom: 0.8rem;
         }
 
-        /* 컨텐츠 카드 스타일 */
         .content-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
@@ -769,6 +768,12 @@
             display: block;
         }
 
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
         @media (max-width: 768px) {
             .hero h2 { font-size: 2.5rem; }
             .video-grid { grid-template-columns: 1fr; }
@@ -855,7 +860,9 @@
                 </div>
             </div>
 
-            <div class="video-grid" id="videoGrid"></div>
+            <div class="video-grid" id="videoGrid">
+                <div class="loading">데이터 로딩 중...</div>
+            </div>
         </div>
 
         <!-- 컨텐츠 섹션 -->
@@ -871,7 +878,9 @@
                 </div>
             </div>
 
-            <div class="content-grid" id="contentGrid"></div>
+            <div class="content-grid" id="contentGrid">
+                <div class="loading">데이터 로딩 중...</div>
+            </div>
         </div>
     </div>
 
@@ -985,7 +994,27 @@
         </div>
     </footer>
 
-    <script>
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        // Firebase 설정
+        const firebaseConfig = {
+            apiKey: "AIzaSyAcvvkFpELh1c05cU8U5xAQNSntHvOhXNo",
+            authDomain: "dama-63811.firebaseapp.com",
+            databaseURL: "https://dama-63811-default-rtdb.firebaseio.com",
+            projectId: "dama-63811",
+            storageBucket: "dama-63811.firebasestorage.app",
+            messagingSenderId: "505595882243",
+            appId: "1:505595882243:web:741a28a3a0d20074d31736",
+            measurementId: "G-BG8CS1JNZR"
+        };
+
+        // Firebase 초기화
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
         // 상태 변수
         let isAdmin = false;
         let videos = [];
@@ -994,21 +1023,34 @@
         let currentThumbnail = null;
         let currentContentThumbnail = null;
         let selectedRating = 0;
-        let currentSection = 'videos'; // 'videos' or 'contents'
+        let currentSection = 'videos';
         const ADMIN_PASSWORD = 'damagood';
 
-        // 로컬 스토리지
-        function loadData() {
-            const savedVideos = localStorage.getItem('songdama_videos');
-            if (savedVideos) videos = JSON.parse(savedVideos);
-            
-            const savedContents = localStorage.getItem('songdama_contents');
-            if (savedContents) contents = JSON.parse(savedContents);
-        }
+        // Firestore에서 데이터 로드
+        async function loadData() {
+            try {
+                // 영상 로드
+                const videosQuery = query(collection(db, 'videos'), orderBy('date', 'desc'));
+                const videosSnapshot = await getDocs(videosQuery);
+                videos = videosSnapshot.docs.map(doc => ({
+                    firestoreId: doc.id,
+                    ...doc.data()
+                }));
 
-        function saveData() {
-            localStorage.setItem('songdama_videos', JSON.stringify(videos));
-            localStorage.setItem('songdama_contents', JSON.stringify(contents));
+                // 컨텐츠 로드
+                const contentsQuery = query(collection(db, 'contents'), orderBy('date', 'desc'));
+                const contentsSnapshot = await getDocs(contentsQuery);
+                contents = contentsSnapshot.docs.map(doc => ({
+                    firestoreId: doc.id,
+                    ...doc.data()
+                }));
+
+                renderVideos();
+                renderContents();
+            } catch (error) {
+                console.error('데이터 로드 오류:', error);
+                alert('데이터를 불러오는 중 오류가 발생했습니다.');
+            }
         }
 
         // 유튜브 썸네일
@@ -1049,7 +1091,7 @@
                 card.className = `video-card ${video.contentType === 'shorts' ? 'shorts' : ''}`;
                 
                 card.innerHTML = `
-                    ${isAdmin ? `<button class="delete-video-btn show" data-video-id="${video.id}">×</button>` : ''}
+                    ${isAdmin ? `<button class="delete-video-btn show" data-firestore-id="${video.firestoreId}">×</button>` : ''}
                     <div class="video-thumbnail">
                         ${thumbnail ? `<img src="${thumbnail}" alt="${video.title}">` : ''}
                         <span class="content-type-badge">${video.contentType === 'shorts' ? '숏폼' : '롱폼'}</span>
@@ -1066,13 +1108,21 @@
             if (isAdmin) {
                 const deleteButtons = document.querySelectorAll('.delete-video-btn');
                 deleteButtons.forEach(btn => {
-                    btn.addEventListener('click', function(e) {
+                    btn.addEventListener('click', async function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        const videoId = parseInt(this.getAttribute('data-video-id'));
-                        videos = videos.filter(v => v.id !== videoId);
-                        saveData();
-                        renderVideos();
+                        if (confirm('정말 삭제하시겠습니까?')) {
+                            const firestoreId = this.getAttribute('data-firestore-id');
+                            try {
+                                await deleteDoc(doc(db, 'videos', firestoreId));
+                                videos = videos.filter(v => v.firestoreId !== firestoreId);
+                                renderVideos();
+                                alert('영상이 삭제되었습니다.');
+                            } catch (error) {
+                                console.error('삭제 오류:', error);
+                                alert('삭제 중 오류가 발생했습니다.');
+                            }
+                        }
                     });
                 });
             }
@@ -1121,7 +1171,7 @@
                     .join('');
                 
                 card.innerHTML = `
-                    ${isAdmin ? `<button class="delete-content-btn show" data-content-id="${content.id}">×</button>` : ''}
+                    ${isAdmin ? `<button class="delete-content-btn show" data-firestore-id="${content.firestoreId}">×</button>` : ''}
                     <div class="content-thumbnail">
                         ${content.thumbnail ? `<img src="${content.thumbnail}" alt="${content.name}">` : ''}
                     </div>
@@ -1141,13 +1191,21 @@
             if (isAdmin) {
                 const deleteButtons = document.querySelectorAll('.delete-content-btn');
                 deleteButtons.forEach(btn => {
-                    btn.addEventListener('click', function(e) {
+                    btn.addEventListener('click', async function(e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        const contentId = parseInt(this.getAttribute('data-content-id'));
-                        contents = contents.filter(c => c.id !== contentId);
-                        saveData();
-                        renderContents();
+                        if (confirm('정말 삭제하시겠습니까?')) {
+                            const firestoreId = this.getAttribute('data-firestore-id');
+                            try {
+                                await deleteDoc(doc(db, 'contents', firestoreId));
+                                contents = contents.filter(c => c.firestoreId !== firestoreId);
+                                renderContents();
+                                alert('컨텐츠가 삭제되었습니다.');
+                            } catch (error) {
+                                console.error('삭제 오류:', error);
+                                alert('삭제 중 오류가 발생했습니다.');
+                            }
+                        }
                     });
                 });
             }
@@ -1254,8 +1312,6 @@
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
             loadData();
-            renderVideos();
-            renderContents();
             
             // 네비게이션
             document.getElementById('navVideos').addEventListener('click', (e) => {
@@ -1323,7 +1379,6 @@
             document.getElementById('addContentBtn').addEventListener('click', () => {
                 document.getElementById('addContentModal').classList.add('show');
                 setRating(0);
-                // 설명 입력 초기화
                 const descInputs = document.getElementById('descriptionInputs');
                 descInputs.innerHTML = `
                     <div class="description-input-group">
@@ -1348,7 +1403,7 @@
             });
             
             // 영상 추가
-            document.getElementById('videoSubmit').addEventListener('click', () => {
+            document.getElementById('videoSubmit').addEventListener('click', async () => {
                 const title = document.getElementById('videoTitle').value.trim();
                 const description = document.getElementById('videoDescription').value.trim();
                 const contentType = document.getElementById('contentType').value;
@@ -1364,28 +1419,36 @@
                     return;
                 }
                 
-                videos.unshift({
-                    id: Date.now(),
-                    title,
-                    description,
-                    contentType,
-                    url: url || '#',
-                    customThumbnail: currentThumbnail,
-                    date: new Date().toISOString()
-                });
-                
-                saveData();
-                renderVideos();
-                document.getElementById('addVideoModal').classList.remove('show');
-                document.getElementById('videoTitle').value = '';
-                document.getElementById('videoDescription').value = '';
-                document.getElementById('videoUrl').value = '';
-                removeThumbnailPreview();
-                alert('영상이 추가되었습니다!');
+                try {
+                    const newVideo = {
+                        id: Date.now(),
+                        title,
+                        description,
+                        contentType,
+                        url: url || '#',
+                        customThumbnail: currentThumbnail,
+                        date: new Date().toISOString()
+                    };
+                    
+                    const docRef = await addDoc(collection(db, 'videos'), newVideo);
+                    newVideo.firestoreId = docRef.id;
+                    videos.unshift(newVideo);
+                    
+                    renderVideos();
+                    document.getElementById('addVideoModal').classList.remove('show');
+                    document.getElementById('videoTitle').value = '';
+                    document.getElementById('videoDescription').value = '';
+                    document.getElementById('videoUrl').value = '';
+                    removeThumbnailPreview();
+                    alert('영상이 추가되었습니다!');
+                } catch (error) {
+                    console.error('추가 오류:', error);
+                    alert('영상 추가 중 오류가 발생했습니다.');
+                }
             });
             
             // 컨텐츠 추가
-            document.getElementById('contentSubmit').addEventListener('click', () => {
+            document.getElementById('contentSubmit').addEventListener('click', async () => {
                 const name = document.getElementById('contentName').value.trim();
                 const descInputs = document.querySelectorAll('.content-desc-input');
                 const descriptions = Array.from(descInputs)
@@ -1412,22 +1475,30 @@
                     return;
                 }
                 
-                contents.unshift({
-                    id: Date.now(),
-                    name,
-                    thumbnail: currentContentThumbnail,
-                    rating: selectedRating,
-                    descriptions: descriptions,
-                    date: new Date().toISOString()
-                });
-                
-                saveData();
-                renderContents();
-                document.getElementById('addContentModal').classList.remove('show');
-                document.getElementById('contentName').value = '';
-                removeContentThumbnailPreview();
-                setRating(0);
-                alert('컨텐츠가 추가되었습니다!');
+                try {
+                    const newContent = {
+                        id: Date.now(),
+                        name,
+                        thumbnail: currentContentThumbnail,
+                        rating: selectedRating,
+                        descriptions: descriptions,
+                        date: new Date().toISOString()
+                    };
+                    
+                    const docRef = await addDoc(collection(db, 'contents'), newContent);
+                    newContent.firestoreId = docRef.id;
+                    contents.unshift(newContent);
+                    
+                    renderContents();
+                    document.getElementById('addContentModal').classList.remove('show');
+                    document.getElementById('contentName').value = '';
+                    removeContentThumbnailPreview();
+                    setRating(0);
+                    alert('컨텐츠가 추가되었습니다!');
+                } catch (error) {
+                    console.error('추가 오류:', error);
+                    alert('컨텐츠 추가 중 오류가 발생했습니다.');
+                }
             });
             
             // 별점 입력
